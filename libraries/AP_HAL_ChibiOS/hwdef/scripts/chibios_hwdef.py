@@ -151,7 +151,7 @@ def get_mcu_lib(mcu):
 
 def setup_mcu_type_defaults():
     '''setup defaults for given mcu type'''
-    global pincount, ports, portmap, vtypes, mcu_type
+    global pincount, ports, portmap, vtypes, mcu_type, dma_exclude_pattern
     lib = get_mcu_lib(mcu_type)
     if hasattr(lib, 'pincount'):
         pincount = lib.pincount
@@ -166,6 +166,9 @@ def setup_mcu_type_defaults():
         for pin in range(pincount[port]):
             portmap[port].append(generic_pin(port, pin, None, default_gpio[0], default_gpio[1:]))
 
+    if mcu_series.startswith("STM32H7") or mcu_series.startswith("STM32F7"):
+        # default DMA off on I2C for H7, we're much better off reducing DMA sharing
+        dma_exclude_pattern = ['I2C*']
 
 def get_alt_function(mcu, pin, function):
     '''return alternative function number for a pin'''
@@ -762,6 +765,9 @@ def get_flash_pages_sizes():
         return [ 128 ] * (get_config('FLASH_SIZE_KB', type=int)//128)
     elif mcu_series.startswith('STM32F100') or mcu_series.startswith('STM32F103'):
         return [ 1 ] * get_config('FLASH_SIZE_KB', type=int)
+    elif mcu_series.startswith('STM32L4') and mcu_type.startswith('STM32L4R'):
+        # STM32L4PLUS
+        return [ 4 ] * (get_config('FLASH_SIZE_KB', type=int)//4)
     elif (mcu_series.startswith('STM32F105') or
           mcu_series.startswith('STM32F3') or
           mcu_series.startswith('STM32G4') or
@@ -1688,7 +1694,7 @@ def write_board_validate_macro(f):
                 check_string = output
             validate_dict[check_name] = check_string
         # Finally create check conditional
-        for check_name in validate_dict:
+        for check_name in sorted(validate_dict.keys()):
             validate_string += "!" + validate_dict[check_name] + "?" + "\"" + check_name + "\"" + ":"
         validate_string += "nullptr"
         f.write('#define HAL_VALIDATE_BOARD (%s)\n\n' % validate_string) 
@@ -2340,8 +2346,8 @@ def write_alt_config(f):
 
 #define HAL_PIN_ALT_CONFIG { \\
 ''')
-    for alt in altmap.keys():
-        for pp in altmap[alt].keys():
+    for alt in sorted(altmap.keys()):
+        for pp in sorted(altmap[alt].keys()):
             p = altmap[alt][pp]
             f.write("    { %u, %s, PAL_LINE(GPIO%s,%uU), %s, %u}, /* %s */ \\\n" % (alt, p.pal_modeline(), p.port, p.pin, p.periph_type(), p.periph_instance(), str(p)))
     f.write('}\n\n')
@@ -2904,6 +2910,10 @@ def add_apperiph_defaults(f):
 
 #ifndef AP_FETTEC_ONEWIRE_ENABLED
 #define AP_FETTEC_ONEWIRE_ENABLED 0
+#endif
+
+#ifndef AP_KDECAN_ENABLED
+#define AP_KDECAN_ENABLED 0
 #endif
 
 #ifndef HAL_GENERATOR_ENABLED
